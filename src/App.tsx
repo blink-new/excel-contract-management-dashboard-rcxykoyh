@@ -1,18 +1,11 @@
 import { useState } from "react";
-import { 
-  SidebarProvider, 
-  Sidebar, 
-  SidebarContent, 
-  SidebarGroup, 
-  SidebarGroupContent, 
-  SidebarGroupLabel, 
-  SidebarHeader, 
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarTrigger 
-} from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+
+import { Calendar } from "@/components/ui/calendar";
 import { 
   Table, 
   TableBody, 
@@ -21,14 +14,6 @@ import {
   TableHeader, 
   TableRow 
 } from "@/components/ui/table";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Calendar } from "@/components/ui/calendar";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import * as XLSX from "xlsx";
 import {
   format,
@@ -47,7 +32,9 @@ import {
   Clock,
   Building2,
   TrendingUp,
-  Download
+  Download,
+  Search,
+  Filter
 } from "lucide-react";
 import { createSampleExcelFile } from "@/utils/sampleData";
 import { safeParseDate, safeParseISO, isValidDate } from "@/utils/dateUtils";
@@ -63,17 +50,12 @@ interface ContractData {
   abgelaufeneMonate: number;
 }
 
-interface RawExcelData {
-  [key: string]: unknown;
-}
-
 export default function App() {
   const [rows, setRows] = useState<ContractData[]>([]);
-  const [rawExcelData, setRawExcelData] = useState<RawExcelData[]>([]);
-  const [excelHeaders, setExcelHeaders] = useState<string[]>([]);
   const [filteredStatus, setFilteredStatus] = useState("Alle");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
+  const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
 
   function handleImportExcel(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -87,15 +69,6 @@ export default function App() {
       const wsname = wb.SheetNames[0];
       const ws = wb.Sheets[wsname];
       const data = XLSX.utils.sheet_to_json(ws) as Record<string, unknown>[];
-
-      // Store raw Excel data
-      setRawExcelData(data);
-      
-      // Extract headers from first row
-      if (data.length > 0) {
-        const headers = Object.keys(data[0]);
-        setExcelHeaders(headers);
-      }
 
       // Process data for the contract view
       const formatted = data.map((item: Record<string, unknown>, index: number) => {
@@ -205,110 +178,154 @@ export default function App() {
     return date ? format(date, "dd.MM.yyyy") : "-";
   };
 
-  // Get headers starting from column 4 (index 3)
-  const getHeadersFromColumn4 = () => {
-    return excelHeaders.slice(3);
-  };
-
-  // Get raw data starting from column 4
-  const getRawDataFromColumn4 = () => {
-    return rawExcelData.map((row) => {
-      const values: unknown[] = [];
-      excelHeaders.slice(3).forEach((header) => {
-        values.push(row[header]);
-      });
-      return values;
-    });
-  };
-
   return (
-    <SidebarProvider>
-      <div className="flex h-screen w-full bg-gray-50/40">
-        <Sidebar className="border-r">
-          <SidebarHeader className="border-b bg-white">
-            <div className="flex items-center gap-2 px-4 py-3">
-              <Building2 className="h-6 w-6 text-blue-600" />
-              <div>
-                <h1 className="text-lg font-semibold">Contract Manager</h1>
-                <p className="text-sm text-muted-foreground">Vertragsmanagement</p>
+    <div className="flex h-screen bg-gray-50">
+      {/* Left Slide Panel */}
+      <div className={`${isLeftPanelOpen ? 'w-96' : 'w-16'} transition-all duration-300 bg-white border-r border-gray-200 shadow-lg flex flex-col`}>
+        {/* Header */}
+        <div className="p-6 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-blue-100 rounded-lg">
+                <Building2 className="h-6 w-6 text-blue-600" />
+              </div>
+              {isLeftPanelOpen && (
+                <div>
+                  <h1 className="text-xl font-bold text-gray-900">Contract Manager</h1>
+                  <p className="text-sm text-gray-500">Vertragsmanagement</p>
+                </div>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsLeftPanelOpen(!isLeftPanelOpen)}
+              className="p-2"
+            >
+              <Filter className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Calendar Section */}
+        {isLeftPanelOpen && (
+          <div className="p-6 border-b border-gray-100">
+            <div className="flex items-center gap-2 mb-4">
+              <CalendarIcon className="h-5 w-5 text-gray-600" />
+              <h3 className="font-semibold text-gray-900">Kalender</h3>
+            </div>
+            <Calendar
+              mode="single"
+              selected={selectedDate}
+              onSelect={setSelectedDate}
+              className="rounded-lg border border-gray-200"
+            />
+            
+            {selectedDate && isValid(selectedDate) && (
+              <div className="mt-4 space-y-2">
+                <h4 className="font-medium text-sm text-gray-700">
+                  {format(selectedDate, "dd.MM.yyyy")}:
+                </h4>
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {getCalendarEvents()
+                    .filter(event => isSameDay(event.date, selectedDate))
+                    .map((event, index) => (
+                      <div key={index} className="flex items-center gap-2 p-2 bg-gray-50 rounded-md">
+                        <div className={`w-2 h-2 rounded-full ${
+                          event.isExpired 
+                            ? 'bg-red-500' 
+                            : event.isDue 
+                              ? 'bg-amber-500' 
+                              : 'bg-green-500'
+                        }`}></div>
+                        <span className="text-sm text-gray-700">{event.title}</span>
+                      </div>
+                    ))}
+                  {getCalendarEvents().filter(event => isSameDay(event.date, selectedDate)).length === 0 && (
+                    <p className="text-sm text-gray-500 italic">Keine Verträge an diesem Tag</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Statistics */}
+        {isLeftPanelOpen && (
+          <div className="p-6 border-b border-gray-100">
+            <div className="flex items-center gap-2 mb-4">
+              <TrendingUp className="h-5 w-5 text-gray-600" />
+              <h3 className="font-semibold text-gray-900">Statistiken</h3>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="p-3 bg-blue-50 rounded-lg">
+                <div className="text-2xl font-bold text-blue-600">{stats.total}</div>
+                <div className="text-xs text-blue-600">Gesamt</div>
+              </div>
+              <div className="p-3 bg-green-50 rounded-lg">
+                <div className="text-2xl font-bold text-green-600">{stats.online}</div>
+                <div className="text-xs text-green-600">Online</div>
+              </div>
+              <div className="p-3 bg-amber-50 rounded-lg">
+                <div className="text-2xl font-bold text-amber-600">{stats.due}</div>
+                <div className="text-xs text-amber-600">Fällig</div>
+              </div>
+              <div className="p-3 bg-red-50 rounded-lg">
+                <div className="text-2xl font-bold text-red-600">{stats.expired}</div>
+                <div className="text-xs text-red-600">Abgelaufen</div>
               </div>
             </div>
-          </SidebarHeader>
-          
-          <SidebarContent>
-            <SidebarGroup>
-              <SidebarGroupLabel className="text-xs font-medium uppercase tracking-wider text-gray-500 px-3 pb-2">
-                Filter
-              </SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {filters.map((filter) => (
-                    <SidebarMenuItem key={filter.key}>
-                      <SidebarMenuButton
-                        isActive={filteredStatus === filter.key}
-                        onClick={() => setFilteredStatus(filter.key)}
-                        className="w-full justify-between"
-                      >
-                        <div className="flex items-center gap-2">
-                          <filter.icon className="h-4 w-4" />
-                          {filter.label}
-                        </div>
-                        <Badge variant="secondary" className="ml-auto">
-                          {filter.count}
-                        </Badge>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
+          </div>
+        )}
 
-            <Separator className="my-4" />
-
-            <SidebarGroup>
-              <SidebarGroupLabel className="text-xs font-medium uppercase tracking-wider text-gray-500 px-3 pb-2">
-                Statistiken
-              </SidebarGroupLabel>
-              <SidebarGroupContent className="px-3">
-                <div className="grid grid-cols-2 gap-2">
-                  <Card className="p-3">
-                    <div className="flex items-center gap-2">
-                      <TrendingUp className="h-4 w-4 text-blue-600" />
-                      <div>
-                        <p className="text-lg font-semibold">{stats.total}</p>
-                        <p className="text-xs text-muted-foreground">Gesamt</p>
-                      </div>
-                    </div>
-                  </Card>
-                  <Card className="p-3">
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-4 w-4 text-red-600" />
-                      <div>
-                        <p className="text-lg font-semibold">{stats.due + stats.expired}</p>
-                        <p className="text-xs text-muted-foreground">Kritisch</p>
-                      </div>
-                    </div>
-                  </Card>
-                </div>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          </SidebarContent>
-        </Sidebar>
-
-        <SidebarInset className="flex flex-col">
-          <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-white px-6">
-            <SidebarTrigger className="-ml-1" />
-            <Separator orientation="vertical" className="mr-2 h-4" />
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold">Vertragsübersicht</h2>
+        {/* Filters */}
+        {isLeftPanelOpen && (
+          <div className="p-6 flex-1">
+            <div className="flex items-center gap-2 mb-4">
+              <Filter className="h-5 w-5 text-gray-600" />
+              <h3 className="font-semibold text-gray-900">Filter</h3>
             </div>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="space-y-2">
+              {filters.map((filter) => (
+                <Button
+                  key={filter.key}
+                  variant={filteredStatus === filter.key ? "default" : "ghost"}
+                  className="w-full justify-between"
+                  onClick={() => setFilteredStatus(filter.key)}
+                >
+                  <div className="flex items-center gap-2">
+                    <filter.icon className="h-4 w-4" />
+                    {filter.label}
+                  </div>
+                  <Badge variant="secondary" className="ml-auto">
+                    {filter.count}
+                  </Badge>
+                </Button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 flex flex-col">
+        {/* Header */}
+        <div className="bg-white border-b border-gray-200 p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900">Vertragsübersicht</h2>
+              <p className="text-gray-500">
+                {filteredRows.length} von {rows.length} Verträgen werden angezeigt
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
               <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                 <Input
                   placeholder="Verträge suchen..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-64"
+                  className="pl-10 w-64"
                 />
               </div>
               <Label htmlFor="excel-upload" className="cursor-pointer">
@@ -336,171 +353,89 @@ export default function App() {
                 Sample Excel
               </Button>
             </div>
-          </header>
+          </div>
+        </div>
 
-          <main className="flex-1 overflow-auto p-6">
-            <div className="grid gap-6 lg:grid-cols-3">
-              <div className="lg:col-span-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <FileText className="h-5 w-5" />
-                      Vertragsdetails
-                    </CardTitle>
-                    <CardDescription>
-                      {filteredRows.length} von {rows.length} Verträgen werden angezeigt
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <Tabs defaultValue="processed" className="w-full">
-                      <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="processed">Vertragsübersicht</TabsTrigger>
-                        <TabsTrigger value="raw">Rohdaten ab Spalte 4</TabsTrigger>
-                      </TabsList>
-                      
-                      <TabsContent value="processed" className="space-y-4">
-                        <div className="rounded-md border">
-                          <Table>
-                            <TableHeader>
-                              <TableRow className="bg-gray-50/60">
-                                <TableHead className="font-medium">Name</TableHead>
-                                <TableHead className="font-medium">Status</TableHead>
-                                <TableHead className="font-medium">Startdatum</TableHead>
-                                <TableHead className="font-medium">Enddatum</TableHead>
-                                <TableHead className="font-medium">Resttage</TableHead>
-                                <TableHead className="font-medium">Laufzeit</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {filteredRows.length === 0 ? (
-                                <TableRow>
-                                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                                    {rows.length === 0 
-                                      ? "Keine Daten vorhanden. Importieren Sie eine Excel-Datei."
-                                      : "Keine Verträge gefunden."
-                                    }
-                                  </TableCell>
-                                </TableRow>
-                              ) : (
-                                filteredRows.map((row) => (
-                                  <TableRow key={row.id} className="hover:bg-gray-50/60">
-                                    <TableCell className="font-medium">{row.name}</TableCell>
-                                    <TableCell>
-                                      {getStatusBadge(row.status, row.restDays)}
-                                    </TableCell>
-                                    <TableCell>{formatDate(row.startDate)}</TableCell>
-                                    <TableCell>{formatDate(row.endDate)}</TableCell>
-                                    <TableCell>
-                                      <span className={`font-medium ${
-                                        row.restDays <= 0 
-                                          ? "text-red-600" 
-                                          : row.restDays <= 30 
-                                            ? "text-amber-600" 
-                                            : "text-green-600"
-                                      }`}>
-                                        {row.restDays > 0 ? `${row.restDays} Tage` : "Abgelaufen"}
-                                      </span>
-                                    </TableCell>
-                                    <TableCell>
-                                      {row.laufzeit} {row.laufzeit === 1 ? "Monat" : "Monate"}
-                                    </TableCell>
-                                  </TableRow>
-                                ))
-                              )}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      </TabsContent>
-                      
-                      <TabsContent value="raw" className="space-y-4">
-                        <div className="rounded-md border">
-                          <Table>
-                            <TableHeader>
-                              <TableRow className="bg-gray-50/60">
-                                {getHeadersFromColumn4().map((header, index) => (
-                                  <TableHead key={index} className="font-medium">
-                                    {header}
-                                  </TableHead>
-                                ))}
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {getRawDataFromColumn4().length === 0 ? (
-                                <TableRow>
-                                  <TableCell colSpan={getHeadersFromColumn4().length} className="text-center py-8 text-muted-foreground">
-                                    Keine Rohdaten vorhanden. Importieren Sie eine Excel-Datei.
-                                  </TableCell>
-                                </TableRow>
-                              ) : (
-                                getRawDataFromColumn4().map((row, rowIndex) => (
-                                  <TableRow key={rowIndex} className="hover:bg-gray-50/60">
-                                    {row.map((cell, cellIndex) => (
-                                      <TableCell key={cellIndex} className="font-medium">
-                                        {cell?.toString() || "-"}
-                                      </TableCell>
-                                    ))}
-                                  </TableRow>
-                                ))
-                              )}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      </TabsContent>
-                    </Tabs>
-                  </CardContent>
-                </Card>
-              </div>
-
-              <div className="lg:col-span-1">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      <CalendarIcon className="h-5 w-5" />
-                      Ablaufkalender
-                    </CardTitle>
-                    <CardDescription>
-                      Vertragsenden im Überblick
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    <Calendar
-                      mode="single"
-                      selected={selectedDate}
-                      onSelect={setSelectedDate}
-                      className="rounded-md border"
-                    />
-                    
-                    {selectedDate && isValid(selectedDate) && (
-                      <div className="mt-4 space-y-2">
-                        <h4 className="font-medium text-sm">
-                          Ablaufende Verträge am {format(selectedDate, "dd.MM.yyyy")}:
-                        </h4>
-                        {getCalendarEvents()
-                          .filter(event => isSameDay(event.date, selectedDate))
-                          .map((event, index) => (
-                            <div key={index} className="flex items-center gap-2 p-2 bg-gray-50 rounded-md">
-                              <div className={`w-2 h-2 rounded-full ${
-                                event.isExpired 
-                                  ? 'bg-red-500' 
-                                  : event.isDue 
-                                    ? 'bg-amber-500' 
-                                    : 'bg-green-500'
-                              }`}></div>
-                              <span className="text-sm">{event.title}</span>
+        {/* Table Content */}
+        <div className="flex-1 overflow-auto p-6">
+          <Card className="h-full">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Vertragsdetails
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-lg border border-gray-200 overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-gray-50">
+                      <TableHead className="font-semibold">Name</TableHead>
+                      <TableHead className="font-semibold">Status</TableHead>
+                      <TableHead className="font-semibold">Startdatum</TableHead>
+                      <TableHead className="font-semibold">Enddatum</TableHead>
+                      <TableHead className="font-semibold">Resttage</TableHead>
+                      <TableHead className="font-semibold">Laufzeit</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-12">
+                          <div className="flex flex-col items-center gap-3">
+                            <div className="p-3 bg-gray-100 rounded-full">
+                              <FileText className="h-8 w-8 text-gray-400" />
                             </div>
-                          ))}
-                        {getCalendarEvents().filter(event => isSameDay(event.date, selectedDate)).length === 0 && (
-                          <p className="text-sm text-muted-foreground">Keine Verträge an diesem Tag</p>
-                        )}
-                      </div>
+                            <div>
+                              <p className="font-medium text-gray-900">
+                                {rows.length === 0 
+                                  ? "Keine Daten vorhanden" 
+                                  : "Keine Verträge gefunden"
+                                }
+                              </p>
+                              <p className="text-sm text-gray-500">
+                                {rows.length === 0 
+                                  ? "Importieren Sie eine Excel-Datei um zu beginnen" 
+                                  : "Versuchen Sie andere Filterkriterien"
+                                }
+                              </p>
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredRows.map((row) => (
+                        <TableRow key={row.id} className="hover:bg-gray-50">
+                          <TableCell className="font-medium">{row.name}</TableCell>
+                          <TableCell>
+                            {getStatusBadge(row.status, row.restDays)}
+                          </TableCell>
+                          <TableCell>{formatDate(row.startDate)}</TableCell>
+                          <TableCell>{formatDate(row.endDate)}</TableCell>
+                          <TableCell>
+                            <span className={`font-medium ${
+                              row.restDays <= 0 
+                                ? "text-red-600" 
+                                : row.restDays <= 30 
+                                  ? "text-amber-600" 
+                                  : "text-green-600"
+                            }`}>
+                              {row.restDays > 0 ? `${row.restDays} Tage` : "Abgelaufen"}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            {row.laufzeit} {row.laufzeit === 1 ? "Monat" : "Monate"}
+                          </TableCell>
+                        </TableRow>
+                      ))
                     )}
-                  </CardContent>
-                </Card>
+                  </TableBody>
+                </Table>
               </div>
-            </div>
-          </main>
-        </SidebarInset>
+            </CardContent>
+          </Card>
+        </div>
       </div>
-    </SidebarProvider>
+    </div>
   );
 }
