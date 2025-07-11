@@ -28,14 +28,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import * as XLSX from "xlsx";
 import {
   format,
-  parseISO,
   differenceInDays,
   addMonths,
   differenceInMonths,
   isSameDay,
+  isValid,
 } from "date-fns";
 import { 
   Upload, 
@@ -49,6 +50,7 @@ import {
   Download
 } from "lucide-react";
 import { createSampleExcelFile } from "@/utils/sampleData";
+import { safeParseDate, safeParseISO, isValidDate } from "@/utils/dateUtils";
 
 interface ContractData {
   id: number;
@@ -61,8 +63,14 @@ interface ContractData {
   abgelaufeneMonate: number;
 }
 
+interface RawExcelData {
+  [key: string]: unknown;
+}
+
 export default function App() {
   const [rows, setRows] = useState<ContractData[]>([]);
+  const [rawExcelData, setRawExcelData] = useState<RawExcelData[]>([]);
+  const [excelHeaders, setExcelHeaders] = useState<string[]>([]);
   const [filteredStatus, setFilteredStatus] = useState("Alle");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
@@ -80,29 +88,40 @@ export default function App() {
       const ws = wb.Sheets[wsname];
       const data = XLSX.utils.sheet_to_json(ws) as Record<string, unknown>[];
 
-      const formatted = data.map((item: Record<string, unknown>, index: number) => {
-        const startDate = item["Startdatum"]
-          ? new Date(item["Startdatum"])
-          : null;
+      // Store raw Excel data
+      setRawExcelData(data);
+      
+      // Extract headers from first row
+      if (data.length > 0) {
+        const headers = Object.keys(data[0]);
+        setExcelHeaders(headers);
+      }
 
+      // Process data for the contract view
+      const formatted = data.map((item: Record<string, unknown>, index: number) => {
+        // Safely parse the start date
+        const startDate = safeParseDate(item["Startdatum"]);
         const durationMonths = Number(item["Laufzeit in M"]) || 0;
 
-        const endDate = startDate
+        // Calculate end date only if start date is valid
+        const endDate = startDate && isValidDate(startDate)
           ? addMonths(startDate, durationMonths)
           : null;
 
-        const restDays = endDate
+        // Calculate remaining days
+        const restDays = endDate && isValidDate(endDate)
           ? differenceInDays(endDate, new Date())
           : 0;
 
-        const abgelaufeneMonate = startDate && endDate
+        // Calculate elapsed months
+        const abgelaufeneMonate = startDate && isValidDate(startDate)
           ? differenceInMonths(new Date(), startDate)
           : 0;
 
         return {
           id: index + 1,
-          name: item.Name || "Unbenannt",
-          status: item.Status || "online",
+          name: (item.Name as string) || "Unbenannt",
+          status: (item.Status as string) || "online",
           startDate: startDate?.toISOString() || null,
           endDate: endDate?.toISOString() || null,
           restDays,
@@ -137,7 +156,7 @@ export default function App() {
     
     if (filteredStatus === "Alle") return true;
     
-    const due = row.endDate ? parseISO(row.endDate) : null;
+    const due = safeParseISO(row.endDate);
     if (filteredStatus === "Fällig") return due && row.restDays > 0 && row.restDays <= 30;
     if (filteredStatus === "Abgelaufen") return due && row.restDays <= 0;
     if (filteredStatus === "Online") return row.status === "online" && row.restDays > 30;
@@ -148,12 +167,21 @@ export default function App() {
   const getCalendarEvents = () => {
     return rows
       .filter((row) => row.endDate)
-      .map((row) => ({
-        date: parseISO(row.endDate!),
-        title: row.name,
-        isExpired: row.restDays <= 0,
-        isDue: row.restDays > 0 && row.restDays <= 30,
-      }));
+      .map((row) => {
+        const date = safeParseISO(row.endDate);
+        return date ? {
+          date,
+          title: row.name,
+          isExpired: row.restDays <= 0,
+          isDue: row.restDays > 0 && row.restDays <= 30,
+        } : null;
+      })
+      .filter(Boolean) as Array<{
+        date: Date;
+        title: string;
+        isExpired: boolean;
+        isDue: boolean;
+      }>;
   };
 
   const stats = {
@@ -169,6 +197,29 @@ export default function App() {
     { key: "Fällig", label: "Fällig", icon: Clock, count: stats.due },
     { key: "Abgelaufen", label: "Abgelaufen", icon: AlertCircle, count: stats.expired },
   ];
+
+  // Safe date formatting function
+  const formatDate = (dateString: string | null): string => {
+    if (!dateString) return "-";
+    const date = safeParseISO(dateString);
+    return date ? format(date, "dd.MM.yyyy") : "-";
+  };
+
+  // Get headers starting from column 4 (index 3)
+  const getHeadersFromColumn4 = () => {
+    return excelHeaders.slice(3);
+  };
+
+  // Get raw data starting from column 4
+  const getRawDataFromColumn4 = () => {
+    return rawExcelData.map((row) => {
+      const values: unknown[] = [];
+      excelHeaders.slice(3).forEach((header) => {
+        values.push(row[header]);
+      });
+      return values;
+    });
+  };
 
   return (
     <SidebarProvider>
@@ -301,61 +352,101 @@ export default function App() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
-                    <div className="rounded-md border">
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="bg-gray-50/60">
-                            <TableHead className="font-medium">Name</TableHead>
-                            <TableHead className="font-medium">Status</TableHead>
-                            <TableHead className="font-medium">Startdatum</TableHead>
-                            <TableHead className="font-medium">Enddatum</TableHead>
-                            <TableHead className="font-medium">Resttage</TableHead>
-                            <TableHead className="font-medium">Laufzeit</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {filteredRows.length === 0 ? (
-                            <TableRow>
-                              <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                                {rows.length === 0 
-                                  ? "Keine Daten vorhanden. Importieren Sie eine Excel-Datei."
-                                  : "Keine Verträge gefunden."
-                                }
-                              </TableCell>
-                            </TableRow>
-                          ) : (
-                            filteredRows.map((row) => (
-                              <TableRow key={row.id} className="hover:bg-gray-50/60">
-                                <TableCell className="font-medium">{row.name}</TableCell>
-                                <TableCell>
-                                  {getStatusBadge(row.status, row.restDays)}
-                                </TableCell>
-                                <TableCell>
-                                  {row.startDate ? format(parseISO(row.startDate), "dd.MM.yyyy") : "-"}
-                                </TableCell>
-                                <TableCell>
-                                  {row.endDate ? format(parseISO(row.endDate), "dd.MM.yyyy") : "-"}
-                                </TableCell>
-                                <TableCell>
-                                  <span className={`font-medium ${
-                                    row.restDays <= 0 
-                                      ? "text-red-600" 
-                                      : row.restDays <= 30 
-                                        ? "text-amber-600" 
-                                        : "text-green-600"
-                                  }`}>
-                                    {row.restDays > 0 ? `${row.restDays} Tage` : "Abgelaufen"}
-                                  </span>
-                                </TableCell>
-                                <TableCell>
-                                  {row.laufzeit} {row.laufzeit === 1 ? "Monat" : "Monate"}
-                                </TableCell>
+                    <Tabs defaultValue="processed" className="w-full">
+                      <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="processed">Vertragsübersicht</TabsTrigger>
+                        <TabsTrigger value="raw">Rohdaten ab Spalte 4</TabsTrigger>
+                      </TabsList>
+                      
+                      <TabsContent value="processed" className="space-y-4">
+                        <div className="rounded-md border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-gray-50/60">
+                                <TableHead className="font-medium">Name</TableHead>
+                                <TableHead className="font-medium">Status</TableHead>
+                                <TableHead className="font-medium">Startdatum</TableHead>
+                                <TableHead className="font-medium">Enddatum</TableHead>
+                                <TableHead className="font-medium">Resttage</TableHead>
+                                <TableHead className="font-medium">Laufzeit</TableHead>
                               </TableRow>
-                            ))
-                          )}
-                        </TableBody>
-                      </Table>
-                    </div>
+                            </TableHeader>
+                            <TableBody>
+                              {filteredRows.length === 0 ? (
+                                <TableRow>
+                                  <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                                    {rows.length === 0 
+                                      ? "Keine Daten vorhanden. Importieren Sie eine Excel-Datei."
+                                      : "Keine Verträge gefunden."
+                                    }
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                filteredRows.map((row) => (
+                                  <TableRow key={row.id} className="hover:bg-gray-50/60">
+                                    <TableCell className="font-medium">{row.name}</TableCell>
+                                    <TableCell>
+                                      {getStatusBadge(row.status, row.restDays)}
+                                    </TableCell>
+                                    <TableCell>{formatDate(row.startDate)}</TableCell>
+                                    <TableCell>{formatDate(row.endDate)}</TableCell>
+                                    <TableCell>
+                                      <span className={`font-medium ${
+                                        row.restDays <= 0 
+                                          ? "text-red-600" 
+                                          : row.restDays <= 30 
+                                            ? "text-amber-600" 
+                                            : "text-green-600"
+                                      }`}>
+                                        {row.restDays > 0 ? `${row.restDays} Tage` : "Abgelaufen"}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell>
+                                      {row.laufzeit} {row.laufzeit === 1 ? "Monat" : "Monate"}
+                                    </TableCell>
+                                  </TableRow>
+                                ))
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </TabsContent>
+                      
+                      <TabsContent value="raw" className="space-y-4">
+                        <div className="rounded-md border">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-gray-50/60">
+                                {getHeadersFromColumn4().map((header, index) => (
+                                  <TableHead key={index} className="font-medium">
+                                    {header}
+                                  </TableHead>
+                                ))}
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {getRawDataFromColumn4().length === 0 ? (
+                                <TableRow>
+                                  <TableCell colSpan={getHeadersFromColumn4().length} className="text-center py-8 text-muted-foreground">
+                                    Keine Rohdaten vorhanden. Importieren Sie eine Excel-Datei.
+                                  </TableCell>
+                                </TableRow>
+                              ) : (
+                                getRawDataFromColumn4().map((row, rowIndex) => (
+                                  <TableRow key={rowIndex} className="hover:bg-gray-50/60">
+                                    {row.map((cell, cellIndex) => (
+                                      <TableCell key={cellIndex} className="font-medium">
+                                        {cell?.toString() || "-"}
+                                      </TableCell>
+                                    ))}
+                                  </TableRow>
+                                ))
+                              )}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </TabsContent>
+                    </Tabs>
                   </CardContent>
                 </Card>
               </div>
@@ -377,31 +468,9 @@ export default function App() {
                       selected={selectedDate}
                       onSelect={setSelectedDate}
                       className="rounded-md border"
-                      components={{
-                        Day: ({ date, ...props }) => {
-                          const events = getCalendarEvents();
-                          const dayEvents = events.filter(event => 
-                            isSameDay(event.date, date)
-                          );
-                          
-                          return (
-                            <div className="relative">
-                              <button {...props} className={`
-                                w-full h-full flex items-center justify-center text-sm
-                                ${dayEvents.length > 0 ? 'relative' : ''}
-                              `}>
-                                {format(date, 'd')}
-                                {dayEvents.length > 0 && (
-                                  <div className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-red-500 border border-white"></div>
-                                )}
-                              </button>
-                            </div>
-                          );
-                        }
-                      }}
                     />
                     
-                    {selectedDate && (
+                    {selectedDate && isValid(selectedDate) && (
                       <div className="mt-4 space-y-2">
                         <h4 className="font-medium text-sm">
                           Ablaufende Verträge am {format(selectedDate, "dd.MM.yyyy")}:
