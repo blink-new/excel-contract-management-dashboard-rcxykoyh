@@ -79,7 +79,34 @@
   * {
     @apply border-border;
   }
+  
   body {
     @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+  
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  
+  #root {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
+@layer components {
+  .contract-status-online {
+    @apply bg-green-100 text-green-800 border-green-200;
+  }
+  
+  .contract-status-due {
+    @apply bg-amber-100 text-amber-800 border-amber-200;
+  }
+  
+  .contract-status-expired {
+    @apply bg-red-100 text-red-800 border-red-200;
   }
 }
