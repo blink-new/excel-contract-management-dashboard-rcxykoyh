@@ -4,40 +4,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-
 import { Calendar } from "@/components/ui/calendar";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
-} from "@/components/ui/table";
-import * as XLSX from "xlsx";
-import {
-  format,
-  differenceInDays,
-  addMonths,
-  differenceInMonths,
-  isSameDay,
-  isValid,
-} from "date-fns";
-import { 
-  Upload, 
-  Calendar as CalendarIcon, 
-  FileText, 
-  AlertCircle, 
-  CheckCircle, 
-  Clock,
-  Building2,
-  TrendingUp,
-  Download,
-  Search,
-  Filter
-} from "lucide-react";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { format, isSameDay, isValid } from "date-fns";
+import { Upload, Calendar as CalendarIcon, FileText, AlertCircle, CheckCircle, Clock, Building2, TrendingUp, Download, Search, Filter } from "lucide-react";
 import { createSampleExcelFile } from "@/utils/sampleData";
-import { safeParseDate, safeParseISO, isValidDate } from "@/utils/dateUtils";
+import { safeParseISO } from "@/utils/dateUtils";
+import { readExcelFile } from "@/utils/excelUtils";
 
 interface ContractData {
   id: number;
@@ -56,57 +29,28 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
   const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleImportExcel(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleImportExcel(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
+    setIsLoading(true);
+    setError(null);
 
-    reader.onload = (evt) => {
-      const bstr = evt.target?.result;
-      const wb = XLSX.read(bstr, { type: "binary" });
-      const wsname = wb.SheetNames[0];
-      const ws = wb.Sheets[wsname];
-      const data = XLSX.utils.sheet_to_json(ws) as Record<string, unknown>[];
-
-      // Process data for the contract view
-      const formatted = data.map((item: Record<string, unknown>, index: number) => {
-        // Safely parse the start date
-        const startDate = safeParseDate(item["Startdatum"]);
-        const durationMonths = Number(item["Laufzeit in M"]) || 0;
-
-        // Calculate end date only if start date is valid
-        const endDate = startDate && isValidDate(startDate)
-          ? addMonths(startDate, durationMonths)
-          : null;
-
-        // Calculate remaining days
-        const restDays = endDate && isValidDate(endDate)
-          ? differenceInDays(endDate, new Date())
-          : 0;
-
-        // Calculate elapsed months
-        const abgelaufeneMonate = startDate && isValidDate(startDate)
-          ? differenceInMonths(new Date(), startDate)
-          : 0;
-
-        return {
-          id: index + 1,
-          name: (item.Name as string) || "Unbenannt",
-          status: (item.Status as string) || "online",
-          startDate: startDate?.toISOString() || null,
-          endDate: endDate?.toISOString() || null,
-          restDays,
-          laufzeit: durationMonths,
-          abgelaufeneMonate,
-        };
-      });
-
-      setRows(formatted);
-    };
-
-    reader.readAsBinaryString(file);
+    try {
+      const processedData = await readExcelFile(file);
+      setRows(processedData);
+      console.log("Excel data processed successfully:", processedData);
+    } catch (err) {
+      console.error("Error processing Excel file:", err);
+      setError("Fehler beim Laden der Excel-Datei. Bitte überprüfen Sie das Format.");
+    } finally {
+      setIsLoading(false);
+      // Reset file input
+      e.target.value = "";
+    }
   }
 
   const getStatusBadge = (status: string, restDays: number) => {
@@ -317,6 +261,9 @@ export default function App() {
               <p className="text-gray-500">
                 {filteredRows.length} von {rows.length} Verträgen werden angezeigt
               </p>
+              {error && (
+                <p className="text-red-600 text-sm mt-1">{error}</p>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <div className="relative">
@@ -329,10 +276,10 @@ export default function App() {
                 />
               </div>
               <Label htmlFor="excel-upload" className="cursor-pointer">
-                <Button variant="outline" className="gap-2" asChild>
+                <Button variant="outline" className="gap-2" asChild disabled={isLoading}>
                   <div>
                     <Upload className="h-4 w-4" />
-                    Excel importieren
+                    {isLoading ? "Laden..." : "Excel importieren"}
                   </div>
                 </Button>
               </Label>
@@ -342,6 +289,7 @@ export default function App() {
                 accept=".xlsx,.xls"
                 onChange={handleImportExcel}
                 className="hidden"
+                disabled={isLoading}
               />
               <Button
                 variant="ghost"
